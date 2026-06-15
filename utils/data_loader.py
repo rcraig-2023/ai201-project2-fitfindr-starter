@@ -3,7 +3,7 @@ Utility functions for loading the mock listings dataset and wardrobe schema.
 Use these in your tool implementations to access the data without re-reading
 the files each time.
 """
-
+from __future__ import annotations
 import json
 import os
 from typing import Optional

@@ -19,7 +19,7 @@ Usage (once implemented):
 """
 
 from tools import search_listings, suggest_outfit, create_fit_card
-
+import re
 
 # ── session state ─────────────────────────────────────────────────────────────
 
@@ -92,9 +92,56 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # # TODO: implement the planning loop
+    # session = _new_session(query, wardrobe)
+    # session["error"] = "Planning loop not yet implemented."
+    # return session
+
+    # Step 1: Initialize session state
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+    
+    # Step 2: Parse the query (Using regex to extract price and size)
+    size_match = re.search(r'size\s+([a-zA-Z0-9]+)', query, re.IGNORECASE)
+    price_match = re.search(r'\$(\d+(?:\.\d{2})?)', query)
+    
+    size = size_match.group(1).upper() if size_match else None
+    max_price = float(price_match.group(1)) if price_match else None
+    
+    # Clean the description by removing the size and price bits so the search is more accurate
+    description = re.sub(r'size\s+[a-zA-Z0-9]+', '', query, flags=re.IGNORECASE)
+    description = re.sub(r'\$\d+(?:\.\d{2})?', '', description)
+    description = description.replace('under', '').strip()
+
+    session["parsed"] = {"description": description, "size": size, "max_price": max_price}
+    
+    # Step 3: Call Tool 1
+    session["search_results"] = search_listings(
+        description=session["parsed"]["description"], 
+        size=session["parsed"]["size"], 
+        max_price=session["parsed"]["max_price"]
+    )
+    
+    # THE CRITICAL BRANCH: If no results, halt and return the error.
+    if not session["search_results"]:
+        session["error"] = "Couldn't find anything matching that. Try loosening your size or price constraints!"
+        return session
+        
+    # Step 4: State Management - Save the top item
+    session["selected_item"] = session["search_results"][0]
+    
+    # Step 5: Call Tool 2 using the stored state
+    session["outfit_suggestion"] = suggest_outfit(
+        new_item=session["selected_item"], 
+        wardrobe=session["wardrobe"]
+    )
+    
+    # Step 6: Call Tool 3 using the stored state
+    session["fit_card"] = create_fit_card(
+        outfit=session["outfit_suggestion"], 
+        new_item=session["selected_item"]
+    )
+    
+    # Step 7: Return the completed session
     return session
 
 

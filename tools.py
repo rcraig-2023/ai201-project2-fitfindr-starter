@@ -11,7 +11,7 @@ Tools:
     suggest_outfit(new_item, wardrobe)              → str
     create_fit_card(outfit, new_item)               → str
 """
-
+from __future__ import annotations
 import os
 
 from dotenv import load_dotenv
@@ -69,8 +69,47 @@ def search_listings(
 
     Before writing code, fill in the Tool 1 section of planning.md.
     """
-    # Replace this with your implementation
-    return []
+    # 1. Load the data
+    listings = load_listings()
+    results = []
+    
+    # 2. Extract keywords from the user's description (lowercased)
+    keywords = description.lower().split()
+
+    for item in listings:
+        # Filter by price
+        if max_price is not None and item["price"] > max_price:
+            continue
+            
+        # Filter by size (case-insensitive substring match)
+        if size is not None:
+            item_size = item.get("size", "").lower()
+            if size.lower() not in item_size:
+                continue
+
+        # 3. Score by keyword overlap
+        score = 0
+        search_text = (
+            item["title"].lower() + " " + 
+            item["description"].lower() + " " + 
+            " ".join(item.get("style_tags", []))
+        )
+        
+        for word in keywords:
+            if word in search_text:
+                score += 1
+                
+        # 4. Keep if there's any match
+        if score > 0:
+            item["_score"] = score # temporarily store score for sorting
+            results.append(item)
+
+    # 5. Sort by score descending and remove the temporary score key
+    results.sort(key=lambda x: x["_score"], reverse=True)
+    for res in results:
+        del res["_score"]
+
+    return results
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -101,7 +140,37 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     Before writing code, fill in the Tool 2 section of planning.md.
     """
     # Replace this with your implementation
-    return ""
+    client = _get_groq_client()
+    
+    item_details = f"{new_item['title']} ({new_item['category']})"
+    
+    # 1. Handle the Empty Wardrobe Failure Mode gracefully
+    if not wardrobe.get("items"):
+        system_prompt = (
+            "You are an expert fashion stylist. The user just bought a new item but has an empty digital wardrobe. "
+            "Give them 2-3 general styling tips on what kinds of clothes pair well with this item."
+        )
+        user_prompt = f"The item is: {item_details}. How should I style this?"
+    else:
+        # 2. Handle the Happy Path
+        wardrobe_str = "\n".join([f"- {w['name']} ({w['category']})" for w in wardrobe["items"]])
+        system_prompt = (
+            "You are an expert fashion stylist. Suggest 1-2 complete outfits using the user's NEW item "
+            "and pieces specifically chosen from their EXISTING wardrobe."
+        )
+        user_prompt = f"NEW ITEM: {item_details}\n\nEXISTING WARDROBE:\n{wardrobe_str}"
+
+    # 3. Call the LLM
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.7
+    )
+    
+    return response.choices[0].message.content.strip()
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -134,4 +203,30 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
     Before writing code, fill in the Tool 3 section of planning.md.
     """
     # Replace this with your implementation
-    return ""
+# 1. Guard against empty string (Failure Mode handling)
+    if not outfit or not outfit.strip():
+        return "Could not generate fit card: outfit details are missing."
+        
+    client = _get_groq_client()
+    
+    system_prompt = (
+        "You are a Gen-Z fashion influencer writing a casual, authentic OOTD caption. "
+        "Mention the thrifted item, its price, and the platform. Capture the vibe of the outfit. "
+        "Keep it to 2-4 sentences. Use lowercase for an aesthetic vibe. Use 1-2 emojis max."
+    )
+    
+    user_prompt = (
+        f"Item: {new_item['title']} (${new_item['price']} from {new_item['platform']}).\n"
+        f"Outfit Vibe: {outfit}"
+    )
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.9  # High temperature so it sounds different every time!
+    )
+    
+    return response.choices[0].message.content.strip()
